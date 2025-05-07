@@ -1,0 +1,366 @@
+---
+title: "Homework2 (Corrigido)'"
+author: "Davi Jorge"
+format: pdf
+editor: visual
+---
+
+## Atividade 2
+
+### Questão 1
+
+De posse das séries disponibilizadas no drive do curso, implemente testes de RU e verifique a estacionariedade das séries. Os dados estão em formato txt, csv e xls. Indique se as séries são estacionárias ou não. Aplique os testes ADF, PP, KPSS, Zivot-Andrews, e outros que julgar necessário. Você deve apresentar os códigos no apêndice e explicar (se perguntado) sobre os seus resultados e códigos.
+
+#### Resposta
+
+##### Gráfico das séries
+
+```{r}
+#| warning: false
+
+
+# Libraries ---------------------------------------------------------------
+library(tseries)
+library(aTSA)
+library(dplyr)
+library(urca)
+library(ipeadatar)
+library(gt)
+
+# Question 1 --------------------------------------------------------------
+
+# Read datasets -----------------------------------------------------------
+series <- read.table('data/data_exercicio2.txt') %>% 
+  .[,-1]
+
+
+# Plot series -------------------------------------------------------------
+
+plot(ts(series))
+```
+
+##### Teste Dickey Fuller
+
+```{r}
+# Dickey Fuller
+
+dk_resultado = dplyr::tibble(serie = NULL, p_value = NULL)
+
+for (i in 1:length(series)) {
+  
+  dk_test = tseries::adf.test(series[,1])
+  res = dplyr::tibble(serie = i,
+                      p_value = dk_test$p.value)
+  
+  dk_resultado = dk_resultado %>% 
+    rbind(res)
+  
+}
+
+
+```
+
+```{r}
+#| echo: false
+dk_resultado %>%
+  gt() %>%
+  tab_header(
+    title = "Resultados do Teste Dickey Fuller",
+    subtitle = "P-values por série"
+  ) %>%
+  fmt_number(
+    columns = p_value,
+    decimals = 3
+  ) %>%
+  cols_label(
+    serie = "Série",
+    p_value = "P-valor"
+  ) %>%
+  tab_options(
+    table.font.size = "medium",
+    heading.title.font.size = 16,
+    heading.subtitle.font.size = 12
+  )
+
+```
+
+##### Teste Phillips-Perron
+
+A função ela define os testes como:
+
+-   Type 1: Sem drift e sem trend;
+
+-   Type 2: Com drift e sem trend;
+
+-   Type 3: Com ambos.
+
+```{r}
+#| output: false
+
+pp_resultado = dplyr::tibble(serie = NULL, p_value = NULL)
+
+for (i in 1:length(series)) {
+  
+  pp_test = aTSA::pp.test(series[,i])
+  
+  res = dplyr::tibble(serie = rep(i, 3),
+                      type = rownames(pp_test),
+                      p_value = pp_test[,3])
+  
+  pp_resultado = pp_resultado %>% 
+    rbind(res) %>% 
+    dplyr::group_by(serie) %>% 
+    dplyr::arrange(p_value) %>% 
+    dplyr::slice(1)
+  
+}
+```
+
+```{r}
+#| echo: false
+#| 
+pp_resultado %>%
+  dplyr::ungroup() %>% 
+  gt() %>%
+  tab_header(
+    title = "Teste Phillips-Perron"
+  ) %>%
+  fmt_number(
+    columns = p_value,
+    decimals = 3
+  ) %>%
+  cols_label(
+    serie = "Série",
+    type = "Tipo",
+    p_value = "P-valor"
+  ) 
+
+
+```
+
+##### Teste KPSS
+
+As séries foram testadas para estacionariedade em nível e tendência estácionaria.
+
+```{r}
+#| warning: false
+# KPSS
+
+KPSS_resultado = dplyr::tibble(serie = NULL, p_value_T = NULL, p_value_I = NULL)
+
+for (i in 1:length(series)) {
+  
+  KPSS_test = tseries::kpss.test(ts(series[,i]), null = 'Trend')
+  KPSS_test2 = tseries::kpss.test(ts(series[,i]))
+  
+  res = dplyr::tibble(serie = i,
+                      p_value_T = KPSS_test$p.value,
+                      p_value_I = KPSS_test2$p.value)
+  
+  KPSS_resultado = KPSS_resultado %>% 
+    rbind(res) 
+  
+}
+```
+
+```{r}
+#| echo: false
+KPSS_resultado %>%
+  dplyr::ungroup() %>% 
+  gt() %>%
+  tab_header(
+    title = "Teste KPSS"
+  ) %>%
+  fmt_number(
+    columns = p_value_T,
+    decimals = 3
+  ) %>%
+  cols_label(
+    serie = "Série",
+    p_value_T = "P-valor (Tendência)",
+    p_value_I = "P-valor (Intercepto)"
+  ) 
+```
+
+##### Teste Zivot-Andrews
+
+```{r}
+#| warning: false
+
+# ZA
+
+ZA_resultado = dplyr::tibble(serie = NULL, p_value = NULL)
+
+for (i in 1:length(series)) {
+  
+  ZA_test = urca::ur.za(ts(series[,4]), model = 'both') %>% 
+    urca::summary()
+  res = dplyr::tibble(serie = i,
+                      teststat = round(ZA_test@teststat, 2),
+                      cval_5 = ZA_test@cval[2], 
+                      cval_10 = ZA_test@cval[3],
+                      bpoint = ZA_test@bpoint)
+  
+  ZA_resultado = ZA_resultado %>% 
+    rbind(res) 
+  
+}
+
+```
+
+```{r}
+#| echo: false
+ZA_resultado %>%
+  dplyr::ungroup() %>% 
+  gt() %>%
+  tab_header(
+    title = "Teste Zivot-Andrews"
+  ) %>%
+  # fmt_number(
+  #   columns = bpoint,
+  #   decimals = 3
+  # ) %>%
+  cols_label(
+    serie = "Série",
+    teststat = "Estatística teste",
+    cval_5 = "5%", 
+    cval_10 = "10%",
+    bpoint = "Break Point"
+  ) 
+```
+
+### Questão 2
+
+Aplique também os testes de RU nas séries do Produto interno bruto (PIB) a preços de mercado: índice encadeado (média 1995 = 100) e IPCA - geral - índice (dez. 1993 = 100), que você obteve no site do IPEADATA.
+
+#### Resposta
+
+##### Buscando as séries
+
+```{r}
+#| output: false
+
+# Get Series --------------------------------------------------------------
+
+pib <- ipeadata('SCN104_PIBPM104')
+pib_ts <- ts(pib$value)
+
+ipca <- ipeadata('PRECOS12_IPCA12')
+ipca_ts <- ts(ipca$value)
+
+```
+
+##### Testando para o PIB
+
+```{r}
+#| warning: false
+# PIB -------------------------------------------------------------
+
+plot(pib_ts)
+
+tseries::adf.test(pib_ts)
+aTSA::pp.test(pib_ts)
+tseries::kpss.test(pib_ts, null = 'Trend')
+tseries::kpss.test(pib_ts)
+urca::ur.za(pib_ts, model = 'both') %>% 
+  urca::summary()
+
+```
+
+##### Testando para o IPCA
+
+```{r}
+#| warning: false
+
+# IPCA -------------------------------------------------------------
+
+plot(ipca_ts)
+
+tseries::adf.test(ipca_ts)
+aTSA::pp.test(ipca_ts)
+tseries::kpss.test(ipca_ts, 'Trend')
+tseries::kpss.test(ipca_ts)
+urca::ur.za(ipca_ts, model = "both") %>% 
+  urca::summary()
+
+
+```
+
+### Corrigindo Series da Questão 1
+
+Para considerarmos uma série estaionária, precisamos que apenas um teste de raiz unitária ou de estacionariedade aponte que a série é estacionária. Para esse caso, temos no teste KPSS que as séries 2 e 5 podem ser estacionárias em nível. Já o teste Zivot-Andrews sinalizou que a série 4 é estacionária com quebra na observação 49.
+
+Como nenhuma das outras séries possuem tendência estacionária, podemos diferencia-las sem penalização.
+
+```{r}
+#| warning: false
+series_diff <- series %>% 
+  .[,-c(2,4,5)] %>% 
+  sapply(diff) %>% 
+  ts()
+
+dk_resultado = dplyr::tibble(serie = NULL, diff = NULL, p_value = NULL)
+
+for (i in 1:4) {
+  
+  dk_test = tseries::adf.test(series_diff[,i])
+  
+  if (dk_test$p.value > 0.1) {
+    
+    dk_test = tseries::adf.test(diff(series_diff[,i]))
+    
+    res = dplyr::tibble(serie = colnames(series_diff)[i],
+                      p_value = dk_test$p.value,
+                      diff = 2)
+    
+  }else{
+    
+  res = dplyr::tibble(serie = colnames(series_diff)[i],
+                      p_value = dk_test$p.value,
+                      diff = 1)
+  
+  }
+  dk_resultado = dk_resultado %>% 
+    rbind(res)
+  
+}
+
+
+
+```
+
+```{r}
+#| echo: false
+
+
+dk_resultado %>%
+  gt() %>%
+  tab_header(
+    title = "Resultados do Teste Dickey Fuller",
+    subtitle = "P-values por série"
+  ) %>%
+  fmt_number(
+    columns = p_value,
+    decimals = 3
+  ) %>%
+  cols_label(
+    serie = "Série",
+    p_value = "P-valor",
+    diff = "Diferenciações"
+  ) %>%
+  tab_options(
+    table.font.size = "medium",
+    heading.title.font.size = 16,
+    heading.subtitle.font.size = 12
+  )
+
+```
+
+Portanto, bastou uma diferenciação para que as series se tornassem estacionárias
+
+```{r}
+series_diff[,4] <- c(0, diff(series_diff[,4]))
+
+plot(series_diff)
+
+```

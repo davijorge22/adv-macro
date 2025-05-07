@@ -1,0 +1,144 @@
+---
+title: "Practicing: Var model"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+## Practicing a Vector Autorregressive Model
+
+The model I practice will be a VAR in which the variables will be the interest rate, the exchange rate and inflation. This model is usually seen in books as example.
+
+```{r}
+#| warning: false
+#| message: false
+
+library(dplyr)
+library(ipeadatar)
+library(vars)
+library(forecast)
+library(sovereign)
+library(svars)
+library(BVAR)
+
+```
+
+The series will be used are "IPCA - geral - índice (dez. 1993 = 100)",\
+"Taxa de câmbio - R\$ / US\$ - comercial - compra - fim período" and\
+"Taxa de juros - Selic - fixada pelo Copom".
+
+```{r}
+#| warning: false
+#| message: false
+
+
+pi <- ipeadatar::ipeadata('PRECOS12_IPCA12') %>% 
+  dplyr::filter(date > "1996-07-01", date <= "2024-01-01") %>%
+  dplyr::select(value) %>% 
+  ts(., start = 1996, frequency = 12)
+  
+e <- ipeadatar::ipeadata('BM12_ERCF12') %>% 
+  dplyr::filter(date > "1996-07-01", date <= "2024-01-01") %>%
+  dplyr::select(value) %>% 
+  ts(., start = 1996, frequency = 12)
+
+i <- ipeadatar::ipeadata('BM366_TJOVER366') %>% 
+  dplyr::filter(date > "1996-07-01", date <= "2024-01-01") %>%
+  dplyr::group_by(lubridate::year(date), lubridate::month(date)) %>% 
+  dplyr::slice(dplyr::n()) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::select(value) %>% 
+  ts(., start = 1996,  frequency = 12)
+
+
+data_var = cbind(pi, e, i)
+
+plot(data_var)
+
+
+
+```
+
+We now need the amount of lags before estimate the model
+
+```{r}
+#| warning: false
+#| message: false
+
+vars::VARselect(data_var)
+
+```
+
+We choose 6 lags in order to estimate our model
+
+```{r}
+#| warning: false
+#| message: false
+
+
+est_model <- vars::VAR(data_var, lag.max = 9)
+
+summary(est_model)
+
+```
+
+We still need to do test to check our residuals
+
+```{r}
+#| warning: false
+#| message: false
+
+vars::serial.test(est_model, lags.pt = 10, type = "PT.adjusted")
+vars::serial.test(est_model, lags.pt = 10, type = "BG")
+vars::normality.test(est_model)
+vars::arch.test(est_model)
+```
+
+These tets demonstrate that the residuals are not autocorrelated, both by the Portmanteu test and the Breusch-Godfrey test. Besides that, the residuals are normally distributed and the test for heteroskedasticity reject the null hypotesis.
+
+Now, we must estimate the structural var. For this we need the identification Matrix, where we choose the identification. For this study, we identify this by Cholesky. Where we set the inflation as the most exogenous variable, followed by the exchange rate and finally, the most endogenous, the interest rate.
+
+```{r}
+#| warning: false
+#| message: false
+
+a <- diag(1, 3)
+a[lower.tri(a)] <- NA
+
+est_svar <- SVAR(x = est_model, Amat = a,estmethod = 'direct')
+
+
+summary(est_svar)
+
+
+  
+```
+
+The first test is see whether the IFR are well behaved
+
+```{r}
+#| warning: false
+#| message: false
+
+
+vars::irf(est_svar) %>% 
+  plot()
+
+vars::fevd(est_svar) %>% 
+  plot()
+
+teste = id.dc(est_model)
+
+
+svars::hd(teste, series = 1) %>% 
+  plot()
+svars::hd(teste, series = 2) %>% 
+  plot()
+svars::hd(teste, series = 3) %>% 
+  plot()
+
+
+
+
+```

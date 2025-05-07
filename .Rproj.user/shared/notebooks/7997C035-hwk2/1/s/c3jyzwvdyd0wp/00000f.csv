@@ -1,0 +1,62 @@
+"0","#| warning: false"
+"0",""
+"0",""
+"0","# Libraries ---------------------------------------------------------------"
+"0","library(tseries)"
+"2","
+    ‘tseries’ version: 0.10-58
+
+    ‘tseries’ is a package for time series analysis and computational finance.
+
+    See ‘library(help=""tseries"")’ for details.
+
+"
+"0","library(aTSA)"
+"2","
+Anexando pacote: ‘aTSA’
+
+"
+"2","Os seguintes objetos são mascarados por ‘package:tseries’:
+
+    adf.test, kpss.test, pp.test
+
+"
+"2","O seguinte objeto é mascarado por ‘package:graphics’:
+
+    identify
+
+"
+"0","library(dplyr)"
+"2","
+Anexando pacote: ‘dplyr’
+
+"
+"2","Os seguintes objetos são mascarados por ‘package:stats’:
+
+    filter, lag
+
+"
+"2","Os seguintes objetos são mascarados por ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+"
+"0","library(urca)"
+"0","library(ipeadatar)"
+"0","library(gt)"
+"2","Registered S3 methods overwritten by 'htmltools':
+  method               from         
+  print.html           tools:rstudio
+  print.shiny.tag      tools:rstudio
+  print.shiny.tag.list tools:rstudio
+"
+"0","# Question 1 --------------------------------------------------------------"
+"0",""
+"0","# Read datasets -----------------------------------------------------------"
+"0","series <- read.table('data/data_exercicio2.txt') %>% "
+"0","  .[,-1]"
+"0",""
+"0",""
+"0","# Plot series -------------------------------------------------------------"
+"0",""
+"0","plot(ts(series))"
