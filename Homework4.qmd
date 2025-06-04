@@ -1,0 +1,335 @@
+---
+title: "Homework 4 - Adv. Macro 1"
+author: 'Davi Jorge'
+format: pdf
+---
+  
+# Homework 4 - Adv. Macro 1
+  
+  Link com códigos: [GitHub -Adv Macro](https://github.com/davijorge22/adv-macro)
+
+**Questão 1.** De posse da base de dados data_vec_alunos.xls, disponível na pasta da turma, estime um modelo VEC e calcule as elasticidades de curto e longo prazos da demanda de gasolina.
+
+-   **Aplique a metodologia Engle-Granger como visto em sala de aula e compare seus resultados com Alves and Bueno (2003). **
+
+### Resposta:
+
+#### Método Engle-Granger
+
+```{r}
+#| echo: false
+#| warning: false
+
+library(dplyr)
+library(vars)
+library(ggplot2)
+library(PerformanceAnalytics)
+library(purrr)
+library(tidyr)
+library(seasonal)
+library(svars)
+library(broom)
+library(modelsummary)
+library(kableExtra)
+
+
+options(scipen = 99999)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+
+# Importando dados
+
+dados <- readxl::read_excel('data/data_vec_alunos.xls')
+
+# A primeira tarefa é colocar as variaveis em log 
+
+dados_log <- dados %>% 
+  dplyr::mutate(dplyr::across(-Ano, log))
+
+dados_log %>%
+  dplyr::select(-Ano) %>% 
+  ts(start = 1994) %>% 
+  forecast::autoplot(facets= T)
+
+# Segunda tarefa: testar o grau de integração
+
+teste_integracao <- function( nome, serie, type, lags){
+  
+ # serie <- dados_log$Pgasolina
+ # type = "trend"
+ # lags = 2
+  
+  adf_test <- urca::ur.df(serie, type = type, selectlags = "BIC", lags = lags)
+  
+  pp1 <- adf_test@cval[1] %>% abs; pp1
+  valor_teste <- adf_test@teststat[1] %>% abs; valor_teste
+  
+  i = 0
+  
+  while (valor_teste < pp1) {
+    
+    i = i + 1
+    
+    serie <- serie %>% diff
+  
+    adf_test <- urca::ur.df(serie, type = type, selectlags = "BIC", lags = lags)
+    
+    pp1 <- adf_test@cval[1] %>% abs
+    valor_teste <- adf_test@teststat[1] %>% abs; valor_teste
+    
+  }
+  
+  res <- tibble::tibble(serie = nome, ordem_integracao = i)
+  
+  return(res)
+  
+}
+
+
+teste1 = teste_integracao(names(dados_log)[2], dados_log$PIB_cap, "drift", lags = 0) %>%
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags = 1)) %>% 
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags = 1)) %>% 
+  rbind(teste_integracao(names(dados_log)[4], dados_log$Petanol, "drift", lags = 2)) %>% 
+  rbind(teste_integracao(names(dados_log)[5], dados_log$Cgasolina, "drift", lags = 0));# teste1
+
+lags = 2
+  
+teste2 = teste_integracao(names(dados_log)[2], dados_log$PIB_cap, "drift", lags) %>%
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags)) %>% 
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags)) %>% 
+  rbind(teste_integracao(names(dados_log)[4], dados_log$Petanol, "drift", lags)) %>% 
+  rbind(teste_integracao(names(dados_log)[5], dados_log$Cgasolina, "trend", lags)); #teste2
+
+
+
+
+
+```
+
+
+Foi realizado testes de integração nas series e encontrei que as séries são I(2). Os testes foram feitos a partir do teste de raiz unitária Dickey Fuller Aumentado.
+
+
+```{r}
+#| echo: false
+#| warning: false
+
+
+
+t = c(1:nrow(dados_log))
+
+t2 = t^2
+
+ajuste <- lm(dados_log$Cgasolina ~ t + t2 + dados_log$PIB_cap + dados_log$Pgasolina + dados_log$Petanol)
+
+summary(ajuste)
+
+cointegracao = ajuste$residuals
+
+a = teste_integracao(nome = 'erros', type = 'none', lags = 0, serie = cointegracao)
+b = urca::ur.kpss(cointegracao) %>% summary()
+
+cointegracao = cointegracao %>% lag()
+
+
+```
+
+
+
+
+```{r}
+
+dados_diff = dados_log %>% 
+  dplyr::select(-Ano) %>% 
+  ts(start = 1994) %>% 
+  diff(., differences = 1)
+
+
+t = c(1:nrow(dados_diff))
+t2 = t^2
+
+ajuste <- lm(dados_diff[,4] ~ t + t2 + dados_diff[,3] + dados_diff[,2] + dados_diff[,1] + cointegracao[1:nrow(dados_diff)])
+
+summary(ajuste)
+
+```
+
+\newpage
+
+
+#### Método Johansen
+
+-   **Refaça o exercício usando o procedimento de Johansen.**
+
+```{r}
+
+johansen <- urca::ca.jo(dados_log[,-1], type = 'trace', ecdet = 'trend', K = 3)
+summary(johansen)
+
+library(vars)
+VARselect(dados_log[,-1], lag.max = 10, type = "const")
+
+vec <- cajorls(johansen, r = 3)  # r = número de vetores cointegrantes, baseado no teste de Johansen
+summary(vec$rlm)
+
+vec_var <- vec2var(johansen, r = 3)
+
+irf_vec <- irf(vec_var,
+               runs = 1000,
+               impulse = "Petanol",     # variável que sofre o choque
+              # response = "y",    # variável que responde
+               n.ahead = 20,      # horizonte de resposta
+               boot = TRUE,       # usar bootstrap para intervalo de confiança
+               ci = 0.95,
+               )         # intervalo de 95%
+
+plot(irf_vec)
+```
+
+
+**Questão 2.** De posse da base de dados quartely.xls, disponível na pasta da turma, estime um
+modelo VEC para a relação entre a Tbill e a Tbill_3year replicando os resultados de sala de aula.
+
+
+-   **Aplique a metodologia Engle-Granger e o procedimento de Johansen separadamente. Você deve apresentar a relação de longo prazo estimada.**
+
+### Resposta:
+
+#### Método Engle-Granger
+
+
+```{r}
+#| output: false
+#| echo: false
+#| warning: false
+
+# Importando dados
+
+dados <- readxl::read_excel('data/quarterly.xls') %>% 
+    janitor::clean_names() %>%
+  dplyr::mutate(date = lubridate::yq(date),
+                dplyr::across(c(ffr, tbill, tbill_3year, tbill_10year ), as.numeric)) %>% 
+  na.omit()
+# A primeira tarefa é colocar as variaveis em log 
+
+dados %>%
+  # PASSO CHAVE: Transformar os dados para o formato longo
+  pivot_longer(
+    cols = c(tbill, tbill_3year), # Selecione as colunas que você quer plotar
+    names_to = "series",          # Nome da nova coluna para os nomes das séries (ex: "tbill", "tbill_3year")
+    values_to = "value"           # Nome da nova coluna para os valores numéricos
+  ) %>%
+  ggplot(aes(x = date, y = value, linetype = series)) + # Mapeie 'series' para a cor para criar a legenda
+  geom_line() + # Agora, uma única geom_line é suficiente, pois a cor já diferencia
+  labs(
+    title = "Taxas de Juros ao Longo do Tempo",
+    x = "Data",
+    y = "Taxa (%)",
+    color = "Série" # Título da legenda
+  ) +
+  theme_minimal()
+
+# Segunda tarefa: testar o grau de integração
+
+
+
+teste1 = teste_integracao('tbill3m', dados$tbill, "drift", lags = 10) %>%
+    rbind(teste_integracao('tbill3y', dados$tbill_3year, "drift", lags = 10)); teste1
+
+
+
+
+
+```
+
+```{r}
+#| output: false
+#| echo: false
+#| warning: false
+
+dados_diff = dados %>% 
+  dplyr::select(tbill, tbill_3year) %>% 
+  ts(start = 1960, frequency = 4) %>% 
+  diff(., differences = 1)
+
+
+t = c(1:length(dados_diff))
+
+t2 = t^2
+
+ajuste <-   lm( dados$tbill ~ dados$tbill_3year)
+
+summary(ajuste)
+
+cointegracao = ajuste$residuals
+
+teste_integracao(nome = 'erros', type = 'none', lags = 0, serie = cointegracao)
+urca::ur.kpss(cointegracao) %>% summary()
+
+cointegracao = cointegracao %>% lag()
+
+
+
+```
+
+```{r}
+
+
+dados_vec2 = tibble(
+  tbill = dados$tbill %>% diff(),
+  tbill_3year = dados$tbill_3year %>% diff(),
+  coef_lp = cointegracao[-1])
+
+dados_vec2 = tibble(
+  tbill = dados$tbill,
+  tbill_3year = dados$tbill_3year,
+  coef_lp = cointegracao) %>% 
+  na.omit()
+
+
+vars::VARselect(dados_vec2, type = 'none')
+
+vars::VAR(dados_vec2, p = 8, type = 'none')
+
+
+```
+
+\newpage
+
+
+#### Método Johansen
+
+-   **Refaça o exercício usando o procedimento de Johansen.**
+
+```{r}
+
+johansen <- urca::ca.jo(dados[,c(3,4)], type = 'trace', ecdet = 'const', K = 7)
+summary(johansen)
+
+library(vars)
+VARselect(dados[,c(3,4)], lag.max = 10, type = "const")
+
+vec <- cajorls(johansen, r = 1)  # r = número de vetores cointegrantes, baseado no teste de Johansen
+summary(vec$rlm)
+
+
+vec_var <- vec2var(johansen, r = 1)
+
+irf_vec <- irf(vec_var,
+               runs = 1000,
+               #impulse = "Petanol",     # variável que sofre o choque
+              # response = "y",    # variável que responde
+               n.ahead = 20,      # horizonte de resposta
+               boot = TRUE,       # usar bootstrap para intervalo de confiança
+               ci = 0.95,
+               )         # intervalo de 95%
+
+plot(irf_vec)
+```
+
+
+
+

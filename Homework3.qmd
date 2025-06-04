@@ -9,12 +9,23 @@ editor_options:
 
 # Homework 3 - Adv. Macro 1
 
+Link com códigos: [GitHub -Adv Macro](https://github.com/davijorge22/adv-macro)
+
 **Questão 1.** Obtenha as séries mensais de inflação IPCA, IBC-Br (série 24363 do Banco Central), taxa de juros SELIC, índice de preço de commodities (série 27574 do BC) e taxa de câmbio. Calcule uma medida de taxa de juros real utilizando o IPCA como deflator. Use os dados a partir de janeiro de 2000. De posse disso, estime um VAR com dados mensais impondo um esquema de identificação recursivo (cholesky). Você deve usar Inflação IPCA, Taxa de juros real (a que você construiu), índice de preço das commodities, IBC-Br, e taxa de câmbio.
 
 ### Resposta:
 
-As séries que utilizei foram: - IBC-Br - IPCA - geral - acumulado 12 meses\
-- Taxa de juros definida pelo compom (Ultima objservação do mês) - índice de preço de commodities - Taxa de câmbio - Real / Dolar Americano - comercial - compra - fim período
+As séries que utilizei foram:
+
+-   IBC-Br
+
+-   IPCA - geral - acumulado 12 meses
+
+-   Taxa de juros definida pelo compom (Ultima objservação do mês)
+
+-   Índice de preço de commodities
+
+-   Taxa de câmbio - Real / Dolar Americano - comercial - compra - fim período
 
 ```{r}
 #| echo: false
@@ -29,8 +40,11 @@ library(hpfilter)
 library(purrr)
 library(tidyr)
 library(seasonal)
+library(svars)
+library(kableExtra)
 
 
+options(scipen = 99999)
 ```
 
 ```{r}
@@ -40,44 +54,58 @@ library(seasonal)
 
 #series_ipea = ipeadatar::available_series()
 
+serie_ipca_1 <- ipeadatar::ipeadata('PRECOS12_IPCAG12'); serie_ipca_1 %>% tail()
+serie_juros_1<- ipeadatar::ipeadata('BM366_TJOVER366'); serie_juros_1 %>% tail()
+serie_cambio_1<- ipeadatar::ipeadata('BM12_ERCF12'); serie_cambio_1 %>% tail()
+serie_ibcbr_1 <- rbcb::get_series(24363); serie_ibcbr_1 %>% tail()
+serie_commodities_1 <- rbcb::get_series(27574); serie_commodities_1 %>% tail()
 
 
-serie_ipca <- ipeadatar::ipeadata('PRECOS12_IPCAG12') %>% 
-  dplyr::mutate(value = rollapplyr((1 + value/100), 12, prod ,align = 'right' , fill = NA)-1) %>% 
+serie_ipca <- serie_ipca_1 %>% 
+  dplyr::mutate(value = (rollapplyr((1 + value/100), 12, prod ,align = 'right' , fill = NA)-1)*100) %>% 
   dplyr::filter(date >= as.Date("2003-01-01") & date < as.Date("2025-02-01")) %>% 
   dplyr::select(value) %>% 
-  ts(start = 2003, frequency = 12)
+  #dplyr::mutate(value = value/100) %>% 
+  ts(start = 2003, frequency = 12); 
 
-serie_juros <- ipeadatar::ipeadata('BM366_TJOVER366') %>% 
-  dplyr::group_by(lubridate::month(date), lubridate::year(date)) %>% 
+serie_ipca_des <- final(seas(serie_ipca)) /100
+
+serie_juros <- serie_juros_1 %>% 
+  dplyr::group_by( lubridate::year(date), lubridate::month(date)) %>% 
   dplyr::slice(1) %>% 
   dplyr::ungroup() %>% 
-  dplyr::filter(date >= as.Date("2003-01-01") & date <= as.Date("2025-02-02")) %>%
+  dplyr::filter(date >= as.Date("2003-01-01") & date <= as.Date("2025-02-01")) %>%
   dplyr::select(value) %>% 
-  ts(start = 2003, frequency = 12)
+  #dplyr::mutate(value = (1 + value/100)^(1/12) - 1) %>% 
+  ts(start = 2003, frequency = 12) ; serie_juros %>% tail()
 
-serie_juros_real <- ((1 + serie_juros/100) / (1 + serie_ipca)) - 1
+serie_juros_real <- (((1 + serie_juros/100) / (1 + serie_ipca_des)) - 1);  serie_juros_real %>% tail()
 
-serie_ibcbr <- rbcb::get_series(24363) %>% 
+serie_ibcbr <- serie_ibcbr_1 %>% 
   dplyr::filter(date >= as.Date("2003-01-01") & date < as.Date("2025-02-01")) %>%
   dplyr::select(value = 2) %>%
   dplyr::mutate(value = log(value)) %>% 
   # hp2(0.5) %>%
-  ts(start = 2003, frequency = 12)
+  ts(start = 2003, frequency = 12); serie_ibcbr %>% tail()
 
-serie_commodities <- rbcb::get_series(27574) %>% 
+serie_ibcbr_des <- final(seas(serie_ibcbr, transform.function = 'log')) 
+
+serie_commodities <- serie_commodities_1 %>% 
   dplyr::filter(date >= as.Date("2003-01-01") & date < as.Date("2025-02-01")) %>%
   dplyr::select(value = 2) %>%
   dplyr::mutate(value = log(value)) %>% 
-  ts(start = 2003, frequency = 12)
+  ts(start = 2003, frequency = 12); serie_commodities %>% tail()
 
-serie_cambio = ipeadatar::ipeadata('BM12_ERCF12') %>% 
+serie_commodities_des <- final(seas(serie_commodities, transform.function = 'log')) 
+
+serie_cambio = serie_cambio_1 %>% 
   dplyr::filter(date >= as.Date("2003-01-01") & date < as.Date("2025-02-01")) %>%
   dplyr::select(value) %>%
-  ts(start = 2003, frequency = 12)
+  dplyr::mutate(value = log(value)) %>% 
+  ts(start = 2003, frequency = 12); serie_cambio %>% tail()
 
 
-series = cbind(serie_ibcbr,  serie_ipca,  serie_cambio, serie_commodities,  serie_juros_real ) 
+series = cbind(  serie_commodities_des,  serie_ibcbr_des,serie_ipca_des,   serie_juros_real,  serie_cambio) 
 
 forecast::autoplot(series, facets = T)
 
@@ -87,64 +115,116 @@ length(serie_cambio)
 length(serie_ipca)
 length(serie_juros_real)
 
-```
 
-#### Criterios de informação
 
-Utilizei para definir a quantidade de lags. O AIC e FPE sugeriram 4 e os outros 2, no entando, utilizei 12 lags, visto que algumas variaveis respondem mais lentamente a choques.
 
-```{r}
-#| output: false
-#| echo: false
-#| warning: false
-vars::VARselect(series, type = 'both' )
 
 ```
 
 #### Estimação do VAR
 
-Para estimar o nosso VAR adicionei dummies para os meses para tentar capturar parte da sazonaliade. Além disso estimei o modelo com constante e tendência.
+Na definição do número de lags o AIC e FPE sugeriram 4 lags e os outros 2 lags, no entando, utilizei 12 lags, em sintonia com a velocidade em que o choque antige as variáveis. Além disso estimei o modelo com constante e tendência.
 
 ```{r}
 #| output: false
 #| echo: false
 #| warning: false
-names = lubridate::month(seq(1,12), label = T)
+vars::VARselect(series, type = 'both', lag.max = 20)$selection
 
-# Criar sequência de datas mensais
-datas <- seq(as.Date("2003-01-01"), by = "month", length.out = 265)
+lags = 12
 
-# Criar dummies mensais
-meses <- format(datas, "%m")
-mes_fator <- factor(meses, levels = sprintf("%02d", 1:12))
-dummies_mensais <- model.matrix(~ mes_fator - 1)  # matriz 266 x 12
+```
 
-dummies_mensais = as_tibble(dummies_mensais)
-names(dummies_mensais) = names
+```{r}
+#| output: false
+#| echo: false
+#| warning: false
+# names = lubridate::month(seq(1,12), label = T)
+# 
+# # Criar sequência de datas mensais
+# datas <- seq(as.Date("2003-01-01"), by = "month", length.out = 265)
+# 
+# # Criar dummies mensais
+# meses <- format(datas, "%m")
+# mes_fator <- factor(meses, levels = sprintf("%02d", 1:12))
+# dummies_mensais <- model.matrix(~ mes_fator - 1)  # matriz 266 x 12
+# 
+# dummies_mensais = as_tibble(dummies_mensais)
+# names(dummies_mensais) = names
 # Colocar a variável endógena em um dataframe
 
 
-var_model = vars::VAR(series, p = 12, type = "both", season = 12)
+var_model = vars::VAR(series, p = lags, type = "both")
 ```
+
+\newpage
 
 #### Testes de diagnóstico
 
-Os testes de diagnósticos, foram Portmanteau para autocorrelação dos resíduos, assim como Breusch-Godfrey LM-statistic para testar conjuntamente os resíduos. Ambos deram signinificantes ao nível de 1% para ausência de autocorrelação. Para o teste de normalidade utilizei Jarque-Bera, Skewness e Kurtosis. Novamente, todos foram significantes à 1%. Por último, utilizei o teste Arch para heterocedasticidade, que também resultou em significante à 1% para homocedasticidade dos resíduos.
+No teste de diagnóstico, meus resíduos não rejeitaram a hipótese de autocorrelação nem através do Portmanteu e nem do teste BG. Além disso, os resíduos não são normalmente distribuídos e são heterocedasticos.
+
+Testei outras variações do modelo como:
+
+-   Aumentando e diminuindo o número de lags;
+
+-   Transformando as variáveis sem diferencia-las;
+
+-   Utilizando IPCA e Juros acumuladas;
+
+Mas em todas as formas os resultados dos testes foram negativos.
+
+\vspace{0.5cm}
 
 ```{r}
-#| output: false
 #| echo: false
 #| warning: false
 
-vars::serial.test(var_model, lags.pt = 20, type = "PT.adjusted")
-vars::serial.test(var_model, lags.pt = 20, type = "BG")
-vars::normality.test(var_model)
-vars::arch.test(var_model)
+diagnostico_var <- function(var_model, lags = 10) {
+  serial_pt <- serial.test(var_model, lags.pt = lags, type = "PT.adjusted")
+  serial_bg <- serial.test(var_model, lags.bg = lags, type = "BG")
+  normalidade <- normality.test(var_model)
+  arch <- arch.test(var_model, lags.multi = lags)
+
+  p_pt <- serial_pt$serial$p.value
+  p_bg <- serial_bg$serial$p.value
+  p_norm_skew <- normalidade$jb.mul$JB$p.value[1]
+  p_norm_kurt <- normalidade$jb.mul$Skewness$p.value[1]
+  p_norm_jb <- normalidade$jb.mul$Kurtosis$p.value[1]
+  p_arch <- arch$arch.mul$p.value
+  stable <- all(Mod(roots(var_model)) < 1)
+
+  tibble::tibble(
+    Teste = c("Autocorrelação (Portmanteau)", 
+              "Autocorrelação (Breusch-Godfrey)", 
+              "Normalidade (Assimetria)", 
+              "Normalidade (Curtose)", 
+              "Normalidade (Jarque-Bera)", 
+              "Heterocedasticidade (ARCH)", 
+              "Estabilidade do VAR"),
+    `P-valor` = c(round(p_pt, 4), 
+                  round(p_bg, 4), 
+                  round(p_norm_skew, 4), 
+                  round(p_norm_kurt, 4), 
+                  round(p_norm_jb, 4), 
+                  round(p_arch, 4), 
+                  ifelse(stable, "Estável", "Instável"))
+  ) %>%
+  kable(format = "latex", caption = "Resultados dos Testes de Diagnóstico do VAR") %>%
+  kable_styling(
+    full_width = F,
+    position = "center",
+    latex_options = "HOLD_position"
+  )
+}
+
+diagnostico_var(var_model, lags = lags)
 ```
+
+\newpage
 
 #### VAR Estrutural
 
-A estrutura da matriz de restrições de cholesky, da mais exógena contemporaneamente para a mais endógena, foi dada por IBC-BR, IPCA, Preço das Commodities, Câmbio e Juros. Escolhemos como o mais endógeno o Juros porque o Banco Central observa todas as variaveis ao tomar a decisão da política. Assim como o Christiano, Eichenbaum and Evans (1999), o mais dificil de avaliar foi o preço das commodities, mas fizemos o teste deixando ela mais endogena e mais exogena, e os resultados não mudaram. E por isso fizemos o mesmo com o câmbio.
+A estrutura da matriz de restrições de cholesky, da mais exógena contemporaneamente para a mais endógena, foi dada por Índice de Commodities, IBC-BR, IPCA, Juros e Câmbio. Escolhemos como o mais endógeno o Câmbio. porque ela responde a todas as variaveis contemporaneamente.
 
 O método de estimação do VAR esstrutural foi o Maximo likelihood.
 
@@ -153,11 +233,15 @@ O método de estimação do VAR esstrutural foi o Maximo likelihood.
 #| warning: false
 #| output: false
 
-a <- diag(1, 5)
+a <- diag(5)
 a[lower.tri(a)] <- NA
 
 svar_model <- vars::SVAR(var_model, Amat = a, estmethod = 'direct')
+
+
+#svar_model = id.chol(var_model)
 ```
+
 \newpage
 
 #### IFR
@@ -171,7 +255,7 @@ As funções de impulso resposta (provavelmente por erro de identificação ou n
 #| fig.height: 6
 
 
-irf = vars::irf(svar_model,impulse = "serie_juros_real", n.ahead = 36, runs = 100, ci = 0.68) 
+irf = vars::irf(svar_model,impulse = "serie_juros_real", n.ahead = 36) 
 
 
 respostas <- names(as_tibble(irf[1]$irf$serie_juros_real))
@@ -204,11 +288,12 @@ wrap_plots(plots, ncol = 3)  +
 
 
 ```
+
 \newpage
 
 #### FEVD
 
-A série de juros real não pareceu importante (acredito que esteja errado)
+A série de juros real cresce em termos de importância ao longo do tempo. Segundo os resultados que obtivemos, a partir do 6 período é possível ver uma certa relevância no produto e na inflação. Chama atenção o seu impacto no índice de commodities após o 10 período pós política.
 
 ```{r}
 #| echo: false
@@ -245,6 +330,7 @@ ggplot(fevd_df, aes(x = Horizon, y = Contribution, fill = Source)) +
 
 
 ```
+
 \newpage
 
 **Questão 2.** Refaça a estimação do VAR impondo restrição de sinais. Você deve usar Inflação IPCA, Taxa de juros real (a que você construiu), índice de preço das commodities, IBC-Br, e taxa de câmbio. Você pode usar ou Uhlig (2005), ou Mountford and Uhlig (2009) ou ainda Arias et al. (2018) como referência. Basta escolher um método e não precisa explicá-lo.
@@ -256,16 +342,19 @@ ggplot(fevd_df, aes(x = Horizon, y = Contribution, fill = Source)) +
 
 library(VARsignR)
 
+set.seed(42)
+
 
 # Restricoes
 
-constr <- c(+5,-2,-1)
+constr <- c(+4,-2,-3)
 
 modelo_varsign <- VARsignR::uhlig.reject(Y = series, nlags = 12,
                                          draws=200, subdraws=200, nkeep=1000, KMIN=1,
-                                         KMAX=6, constrained=constr, constant=T, steps=30)
+                                         KMAX=6, constrained=constr, constant=T, steps=36)
 
-#summary(modelo_varsign)
+summary(modelo_varsign)
+
 
 
 
@@ -282,7 +371,15 @@ modelo_varsign <- VARsignR::uhlig.reject(Y = series, nlags = 12,
 
 ### Resposta
 
-Para o calculo do VAR com restrições de sinais, eu restringi o sinal do log do IBC-Br e do IPCA, ambos negativamente a um choque positivo na política monetária. Eu optei por realizar 200x200 simulações, totalizando 40000. As bandas foram de 68%. Os resultados pareceram melhores em comparação ao Cholesky, ou seja, fizeram mais sentido econômico.
+Para o cálculo do VAR com restrições de sinais, eu restringi o sinal do:
+
+-   Log do IBC-Br: negativo (-);
+-   IPCA: negativo (-);
+
+A um choque positivo na política monetária.
+
+Eu optei por realizar 200x200 simulações, totalizando 40000. As bandas foram de 68%. Os resultados pareceram melhores em comparação ao primeiro exercício.
+
 \newpage
 
 #### IFR
@@ -301,7 +398,8 @@ VARsignR::irfplot(irfdraws = irfs1, type="median",  save=T, bands=c(0.32, 0.68),
 
 
 ```
-\newpage   
+
+\newpage
 
 #### FEVD
 
@@ -315,20 +413,20 @@ VARsignR::fevdplot(fevd1, save=T, bands=c(0.16, 0.84), grid=TRUE,
          bw=FALSE, table=F, periods=NULL)
 
 ```
+
 \newpage
-**Questão 3.**  Neste exercício você deve reproduzir um dos modelos VAR que constam no Relatório Trimestral de Inflação de Setembro de 2012 <https://www.bcb.gov.br/htms/relinf/port/2012/09/ri201209P.pdf>), página 107. O primeiro VAR reproduz o modelo VAR I do relatório, enquanto o segundo reproduz parcialmente o VAR III. Você deve usar um critério para escolha do melhor modelo de previsão. Use os dados a partir de janeiro de 2000.
+
+**Questão 3.** Neste exercício você deve reproduzir um dos modelos VAR que constam no Relatório Trimestral de Inflação de Setembro de 2012 (<https://www.bcb.gov.br/htms/relinf/port/2012/09/ri201209P.pdf>), página 107. O primeiro VAR reproduz o modelo VAR I do relatório, enquanto o segundo reproduz parcialmente o VAR III. Você deve usar um critério para escolha do melhor modelo de previsão. Use os dados a partir de janeiro de 2000.
 
 -   O VAR I: Preços livres, Preços administrados, câmbio, juros reais.
 
--   O VAR III: Preços livres, juros reais e IBC-Br. 
+-   O VAR III: Preços livres, juros reais e IBC-Br.
 
 Projete a inflação de preços livres até o final 2024. Apresente seus resultados num gráfico e tabela.
-
 
 ### Resposta
 
 Realizei a replicação dos quatro modelos VAR descritos na tabela da página 107 do Relatório. O segundo e o quarto VAR foram feitos com as séries dessazonalizadas e para fazer isso utlizei o método X-13ARIMA-SEATS. Calculei as defasagens para cada VAR e respectivamente foram 2, 4, 2 e 4 para os modelos. Após, eu utilizei método out-of-sample para fazer as previsões e caluclei o MSE de cada um. O modelo com menor MSE foi o VAR 3, que utiliza a series dessazonalizadas do IPCA - Preços livres, Produção Industrial (PIM-PF), e juros real.
-
 
 ```{r}
 #| echo: false
@@ -336,32 +434,34 @@ Realizei a replicação dos quatro modelos VAR descritos na tabela da página 10
 #| output: false
 
 serie_plivres <- ipeadatar::ipeadata('BM12_IPCAPL12') %>% 
-  dplyr::mutate(value = rollapplyr((1 + value/100), 12, prod ,align = 'right' , fill = NA)-1) %>%
+  # dplyr::mutate(value = rollapplyr((1 + value/100), 12, prod ,align = 'right' , fill = NA)-1) %>%
   dplyr::filter(date >= as.Date("2003-01-01") & date < as.Date("2025-02-01")) %>% 
   dplyr::select(value) %>% 
-  ts(start = 2003, frequency = 12)
+  ts(start = 2003, frequency = 12)/100
 
 serie_padm <- ipeadatar::ipeadata('BM12_IPCAPM12') %>% 
-  dplyr::mutate(value = rollapplyr((1 + value/100), 12, prod ,align = 'right' , fill = NA)-1) %>%
+  # dplyr::mutate(value = rollapplyr((1 + value/100), 12, prod ,align = 'right' , fill = NA)-1) %>%
   dplyr::filter(date >= as.Date("2003-01-01") & date < as.Date("2025-02-01")) %>% 
   dplyr::select(value) %>% 
-  ts(start = 2003, frequency = 12)
+  ts(start = 2003, frequency = 12)/100
 
 serie_igpm <- ipeadatar::ipeadata('IGP12_IGPMG12') %>% 
-  dplyr::mutate(value = rollapplyr((1 + value/100), 12, prod ,align = 'right' , fill = NA)-1) %>%
+  # dplyr::mutate(value = rollapplyr((1 + value/100), 12, prod ,align = 'right' , fill = NA)-1) %>%
   dplyr::filter(date >= as.Date("2003-01-01") & date < as.Date("2025-02-01")) %>% 
   dplyr::select(value) %>% 
-  ts(start = 2003, frequency = 12)
+  ts(start = 2003, frequency = 12)/100
 
-serie_juros <- ipeadatar::ipeadata('BM366_TJOVER366') %>% 
+serie_igpm2 <- final(seas(serie_igpm))
+
+serie_juros <- ipeadatar::ipeadata('BM12_TJOVER12') %>% 
   dplyr::group_by(lubridate::month(date), lubridate::year(date)) %>% 
   dplyr::slice(1) %>% 
   dplyr::ungroup() %>% 
   dplyr::filter(date >= as.Date("2003-01-01") & date <= as.Date("2025-02-02")) %>%
   dplyr::select(value) %>% 
-  ts(start = 2003, frequency = 12)
+  ts(start = 2003, frequency = 12)/100
 
-serie_juros_real <- ((1 + serie_juros/100) / (1 + final(seas(serie_igpm)))) - 1
+serie_juros_real <- ((1 + serie_juros/100) / (1 + serie_igpm2)) - 1
 
 serie_m1 <- ipeadatar::ipeadata('BM12_M1N12') %>% 
   dplyr::filter(date >= as.Date("2003-01-01") & date < as.Date("2025-02-01")) %>%
@@ -393,7 +493,6 @@ serie_prodind = ipeadatar::ipeadata('PAN12_QIIGG12') %>%
 
 ```
 
-
 ```{r}
 #| echo: false
 #| warning: false
@@ -406,14 +505,14 @@ serie_prodind = ipeadatar::ipeadata('PAN12_QIIGG12') %>%
 # dessazonalizando series
 serie_plivres_des <- final(seas(serie_plivres)) # 'final' extrai a série dessazonalizada
 serie_prodind_des <- final(seas(serie_prodind))
-serie_juros_real_des <- final(seas(serie_juros_real))
+
 serie_m4_bm_des <- final(seas(serie_m4_bm))
 serie_cambio_des <- final(seas(serie_cambio))
 
 
 series_var1 <- cbind(serie_plivres, serie_padm, serie_cambio, serie_juros_real)
-series_var2 <- cbind(serie_plivres_des, serie_m4_bm_des, serie_cambio_des, serie_juros_real_des)
-series_var3 <- cbind(serie_plivres_des, serie_prodind_des, serie_juros_real_des)
+series_var2 <- cbind(serie_plivres_des, serie_m4_bm_des, serie_cambio_des, serie_juros_real)
+series_var3 <- cbind(serie_plivres_des, serie_prodind_des, serie_juros_real)
 series_var4 <- cbind(serie_plivres, serie_m1, serie_juros_real)
 
 series_plot <- cbind(serie_plivres, serie_padm, serie_igpm, serie_cambio, serie_juros_real, serie_m1, serie_m4_bm_des, serie_prodind)
@@ -429,38 +528,17 @@ autoplot(series_plot, facets = T)
 # vars::VARselect(series_var4, type = 'both' ) # 4 defasagens
 
 
-# # VAR 1
-# vars::serial.test(var1, lags.pt = 10, type = "PT.adjusted")
-# vars::serial.test(var1, lags.pt = 10, type = "BG")
-# vars::normality.test(var1)
-# vars::arch.test(var1)
-# 
-# # VAR 2
-# vars::serial.test(var2, lags.pt = 10, type = "PT.adjusted")
-# vars::serial.test(var2, lags.pt = 10, type = "BG")
-# vars::normality.test(var2)
-# vars::arch.test(var2)
-# 
-# # VAR 3
-# vars::serial.test(var3, lags.pt = 10, type = "PT.adjusted")
-# vars::serial.test(var3, lags.pt = 10, type = "BG")
-# vars::normality.test(var3)
-# vars::arch.test(var3)
-# 
-# # VAR 3
-# vars::serial.test(var4, lags.pt = 10, type = "PT.adjusted")
-# vars::serial.test(var4, lags.pt = 10, type = "BG")
-# vars::normality.test(var4)
-# vars::arch.test(var4)
-
-
 # Previsao VAR 1
-treino_var1 <- series_var1 %>% head(n = nrow(series_var1) * .80)
-observado_var1 <- series_var1 %>% tail(n = nrow(series_var1) * .20)
+treino_var1 <- series_var1 %>% head(n = nrow(series_var1) * .90)
+observado_var1 <- series_var1 %>% tail(n = nrow(series_var1) * .1)
 
-var1 <- vars::VAR(treino_var1, type = 'both', p = 2) 
+var1 <- vars::VAR(treino_var1, type = 'both', p = 6) 
 
-forecast_var1 <- predict(var1, n.ahead = 53)
+# diagnostico
+diagnostico_var(var1, lags = 6)
+
+
+forecast_var1 <- predict(var1, n.ahead = 26)
 
 prev_var1 <- forecast_var1$fcst$serie_plivres[, "fcst"]
 
@@ -473,12 +551,17 @@ mse_e <- mean((observado_var1[,"serie_plivres"] - prev_var1)^2)
 
 
 # Previsao VAR 2
-treino_var2 <- series_var2 %>% head(n = nrow(series_var2) * .80)
-observado_var2 <- series_var2 %>% tail(n = nrow(series_var2) * .20)
+treino_var2 <- series_var2 %>% head(n = nrow(series_var2) * .90)
+observado_var2 <- series_var2 %>% tail(n = nrow(series_var2) * .1)
+
 
 var2 <- vars::VAR(treino_var2, type = 'both', p = 4) 
 
-forecast_var2 <- predict(var2, n.ahead = 53)
+# diagnostico
+diagnostico_var(var2, lags = 4)
+
+
+forecast_var2 <- predict(var2, n.ahead = 26)
 
 prev_var2 <- forecast_var2$fcst$serie_plivres_des[, "fcst"]
 
@@ -493,12 +576,16 @@ mse_e2 <- mean((observado_var2[,"serie_plivres_des"] - prev_var2)^2)
 
 
 # Previsao VAR 3
-treino_var3 <- series_var3 %>% head(n = nrow(series_var3) * .80)
-observado_var3 <- series_var3 %>% tail(n = nrow(series_var3) * .20)
+treino_var3 <- series_var3 %>% head(n = nrow(series_var3) * .90)
+observado_var3 <- series_var3 %>% tail(n = nrow(series_var3) * .1)
 
-var3 <- vars::VAR(treino_var3, type = 'both', p = 2) 
+var3 <- vars::VAR(treino_var3, type = 'both', p = 6) 
 
-forecast_var3 <- predict(var3, n.ahead = 53)
+# diagnostico
+diagnostico_var(var3, lags = 6)
+
+
+forecast_var3 <- predict(var3, n.ahead = 26)
 
 prev_var3 <- forecast_var3$fcst$serie_plivres_des[, "fcst"]
 
@@ -513,12 +600,16 @@ mse_e3 <- mean((observado_var3[,"serie_plivres_des"] - prev_var3)^2)
 
 
 # Previsao VAR 4
-treino_var4 <- series_var4 %>% head(n = nrow(series_var4) * .80)
-observado_var4 <- series_var4 %>% tail(n = nrow(series_var4) * .20)
+treino_var4 <- series_var4 %>% head(n = nrow(series_var4) * .90)
+observado_var4 <- series_var4 %>% tail(n = nrow(series_var4) * .10)
 
-var4 <- vars::VAR(treino_var4, type = 'both', p = 4) 
+var4 <- vars::VAR(treino_var4, type = 'both', p = 6) 
 
-forecast_var4 <- predict(var4, n.ahead = 53)
+# diagnostico
+diagnostico_var(var4, lags = 6)
+
+
+forecast_var4 <- predict(var4, n.ahead = 26)
 
 prev_var4 <- forecast_var4$fcst$serie_plivres[, "fcst"]
 
@@ -569,7 +660,8 @@ df_plot <- data.frame(
   previsto3 = prev_full3,
   previsto4 = prev_full4,
   observado = obs_full
-)
+) %>% 
+  dplyr::filter(data >= as.Date("2018-01-01"))
 
 
 
