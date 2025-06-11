@@ -31,6 +31,7 @@ library(svars)
 library(broom)
 library(modelsummary)
 library(kableExtra)
+library(jtools)
 
 
 options(scipen = 99999)
@@ -44,63 +45,63 @@ options(scipen = 99999)
 
 dados <- readxl::read_excel('data/data_vec_alunos.xls')
 
-# A primeira tarefa é colocar as variaveis em log 
+# A primeira tarefa é colocar as variaveis em log
 
-dados_log <- dados %>% 
+dados_log <- dados %>%
   dplyr::mutate(dplyr::across(-Ano, log))
 
 dados_log %>%
-  dplyr::select(-Ano) %>% 
-  ts(start = 1994) %>% 
+  dplyr::select(-Ano) %>%
+  ts(start = 1994) %>%
   forecast::autoplot(facets= T)
 
 # Segunda tarefa: testar o grau de integração
 
 teste_integracao <- function( nome, serie, type, lags){
-  
+
  # serie <- dados_log$Pgasolina
  # type = "trend"
  # lags = 2
-  
+
   adf_test <- urca::ur.df(serie, type = type, selectlags = "BIC", lags = lags)
-  
+
   pp1 <- adf_test@cval[1] %>% abs; pp1
   valor_teste <- adf_test@teststat[1] %>% abs; valor_teste
-  
+
   i = 0
-  
+
   while (valor_teste < pp1) {
-    
+
     i = i + 1
-    
+
     serie <- serie %>% diff
-  
+
     adf_test <- urca::ur.df(serie, type = type, selectlags = "BIC", lags = lags)
-    
+
     pp1 <- adf_test@cval[1] %>% abs
     valor_teste <- adf_test@teststat[1] %>% abs; valor_teste
-    
+
   }
-  
+
   res <- tibble::tibble(serie = nome, ordem_integracao = i)
-  
+
   return(res)
-  
+
 }
 
 
 teste1 = teste_integracao(names(dados_log)[2], dados_log$PIB_cap, "drift", lags = 0) %>%
-  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags = 1)) %>% 
-  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags = 1)) %>% 
-  rbind(teste_integracao(names(dados_log)[4], dados_log$Petanol, "drift", lags = 2)) %>% 
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags = 1)) %>%
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags = 1)) %>%
+  rbind(teste_integracao(names(dados_log)[4], dados_log$Petanol, "drift", lags = 2)) %>%
   rbind(teste_integracao(names(dados_log)[5], dados_log$Cgasolina, "drift", lags = 0));# teste1
 
 lags = 2
-  
+
 teste2 = teste_integracao(names(dados_log)[2], dados_log$PIB_cap, "drift", lags) %>%
-  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags)) %>% 
-  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags)) %>% 
-  rbind(teste_integracao(names(dados_log)[4], dados_log$Petanol, "drift", lags)) %>% 
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags)) %>%
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags)) %>%
+  rbind(teste_integracao(names(dados_log)[4], dados_log$Petanol, "drift", lags)) %>%
   rbind(teste_integracao(names(dados_log)[5], dados_log$Cgasolina, "trend", lags)); #teste2
 
 
@@ -110,8 +111,19 @@ teste2 = teste_integracao(names(dados_log)[2], dados_log$PIB_cap, "drift", lags)
 ```
 
 
-Foi realizado testes de integração nas series e encontrei que as séries são I(2). Os testes foram feitos a partir do teste de raiz unitária Dickey Fuller Aumentado.
+Foi realizado testes de integração nas series e encontrei que as séries são I(2). Os testes foram feitos a partir do teste de raiz unitária Dickey Fuller Aumentado. Para que a interpretação do modelo seja a mesma do trabalho de Alves and Bueno (2003), assumiremos apenas uma integração.
 
+O modelo para extrair o vetor de cointegração é  dado por:
+
+$lnCgasolina$ = $t$ + $t^2$ + $lnPIBcap$ + $lnPgasolina$ + $lnPetanol$ + $e$.
+
+
+Os resultados da regressão está na tabela abaixo. Os residuos da regressão foram testados pelo teste ADF e KPSS e ambos indicaram estacionariedade da série.
+
+<br>
+
+
+\newpage
 
 ```{r}
 #| echo: false
@@ -125,37 +137,46 @@ t2 = t^2
 
 ajuste <- lm(dados_log$Cgasolina ~ t + t2 + dados_log$PIB_cap + dados_log$Pgasolina + dados_log$Petanol)
 
-summary(ajuste)
+jtools::summ(ajuste)
 
 cointegracao = ajuste$residuals
 
-a = teste_integracao(nome = 'erros', type = 'none', lags = 0, serie = cointegracao)
-b = urca::ur.kpss(cointegracao) %>% summary()
+# testo se há raiz unitária nos residuos
 
-cointegracao = cointegracao %>% lag()
+# a = teste_integracao(nome = 'erros', type = 'none', lags = 0, serie = cointegracao)
+# b = urca::ur.kpss(cointegracao) %>% summary()
+
+ cointegracao = cointegracao %>% lag()
 
 
 ```
-
-
-
+<br>
+<br>
+<br>
+Após isso, diferenciei os dados em log, assim como os autores, e rodei um modelo adicionando a variavel de cointegração como regreessor. Os resultados mostram que o $PGasolina$, $PEtanol$ e $Cointegração$ são significantes a um nível de 15%. A justificativa para o uso desse nível de significancia ser válido para o estudo é o tamanho da amostra utilizada.
 
 ```{r}
+#| echo: false
+#| warning: false
 
-dados_diff = dados_log %>% 
-  dplyr::select(-Ano) %>% 
-  ts(start = 1994) %>% 
+
+dados_diff = dados_log %>%
+  dplyr::select(-Ano) %>%
+  ts(start = 1994) %>%
   diff(., differences = 1)
 
+cointegracao = cointegracao[1:nrow(dados_diff)]
 
 t = c(1:nrow(dados_diff))
 t2 = t^2
 
-ajuste <- lm(dados_diff[,4] ~ t + t2 + dados_diff[,3] + dados_diff[,2] + dados_diff[,1] + cointegracao[1:nrow(dados_diff)])
+ajuste <- lm(Cgasolina ~ t + t2 + Petanol     + Pgasolina      + PIB_cap   + cointegracao, dados_diff)
 
-summary(ajuste)
+jtools::summ(ajuste)
+
 
 ```
+
 
 \newpage
 
@@ -164,29 +185,54 @@ summary(ajuste)
 
 -   **Refaça o exercício usando o procedimento de Johansen.**
 
+Foi utilizado o procedimento de Johansen para verificar a presença de vetores de cointegração entre as variáveis do modelo. O teste foi realizado com estatística do tipo trace e tendência linear na relação de cointegração, com três defasagens. O resultado indicou a presença de três vetores de cointegração ao nível de 5%, sugerindo uma relação de longo prazo entre as variáveis.
+
 ```{r}
+#| echo: false
+#| warning: false
 
 johansen <- urca::ca.jo(dados_log[,-1], type = 'trace', ecdet = 'trend', K = 3)
-summary(johansen)
+res0 <- summary(johansen)
+res0@teststat
+res0@cval
 
-library(vars)
-VARselect(dados_log[,-1], lag.max = 10, type = "const")
+
+#library(vars)
+#VARselect(dados_log[,-1], lag.max = 10, type = "const")
+
+
+```
+
+O Resultado do VECM sinaliza que:
+
+-   $PIBcap.dl1$: negativo e significativo ao nível de 5%, indicando que aumentos defasados no PIB per capita reduzem o consumo de gasolina no curto prazo, o que pode sugerir um efeito substituição ou mudança na composição de transporte.
+
+-   $Pgasolina.dl2$: positivo e significativo ao nível de 5%, indicando que choques de dois períodos atrás nos preços da gasolina estão associados a aumentos no consumo de gasolina. (não entendi)
+
+-   $Petanol.dl2$: negativo e significativo ao nível de 5%, indicando que há substituição entre etanol e gasolina no curto prazo.
+
+```{r}
+#| echo: false
+#| warning: false
 
 vec <- cajorls(johansen, r = 3)  # r = número de vetores cointegrantes, baseado no teste de Johansen
-summary(vec$rlm)
+res <- summary(vec$rlm)
 
-vec_var <- vec2var(johansen, r = 3)
+res$`Response Cgasolina.d`
 
-irf_vec <- irf(vec_var,
-               runs = 1000,
-               impulse = "Petanol",     # variável que sofre o choque
-              # response = "y",    # variável que responde
-               n.ahead = 20,      # horizonte de resposta
-               boot = TRUE,       # usar bootstrap para intervalo de confiança
-               ci = 0.95,
-               )         # intervalo de 95%
 
-plot(irf_vec)
+# vec_var <- vec2var(johansen, r = 3)
+#
+# irf_vec <- irf(vec_var,
+#                runs = 1000,
+#                impulse = "Petanol",     # variável que sofre o choque
+#               # response = "y",    # variável que responde
+#                n.ahead = 20,      # horizonte de resposta
+#                boot = TRUE,       # usar bootstrap para intervalo de confiança
+#                ci = 0.95,
+#                )         # intervalo de 95%
+#
+# plot(irf_vec)
 ```
 
 
@@ -200,20 +246,20 @@ modelo VEC para a relação entre a Tbill e a Tbill_3year replicando os resultad
 
 #### Método Engle-Granger
 
+O teste de integração sinaliza 1 integração apenas.
 
 ```{r}
-#| output: false
 #| echo: false
 #| warning: false
 
 # Importando dados
 
-dados <- readxl::read_excel('data/quarterly.xls') %>% 
+dados <- readxl::read_excel('data/quarterly.xls') %>%
     janitor::clean_names() %>%
   dplyr::mutate(date = lubridate::yq(date),
-                dplyr::across(c(ffr, tbill, tbill_3year, tbill_10year ), as.numeric)) %>% 
+                dplyr::across(c(ffr, tbill, tbill_3year, tbill_10year ), as.numeric)) %>%
   na.omit()
-# A primeira tarefa é colocar as variaveis em log 
+# A primeira tarefa é colocar as variaveis em log
 
 dados %>%
   # PASSO CHAVE: Transformar os dados para o formato longo
@@ -237,7 +283,7 @@ dados %>%
 
 
 teste1 = teste_integracao('tbill3m', dados$tbill, "drift", lags = 10) %>%
-    rbind(teste_integracao('tbill3y', dados$tbill_3year, "drift", lags = 10)); teste1
+    rbind(teste_integracao('tbill3y', dados$tbill_3year, "drift", lags = 10))
 
 
 
@@ -245,14 +291,20 @@ teste1 = teste_integracao('tbill3m', dados$tbill, "drift", lags = 10) %>%
 
 ```
 
+A partir disso roda-se o seguinte modelo para encontrar a variável de integração:
+
+$Tbill$ =  $Tbill3year$ + $e$
+
+Os residuos são estacionários para os testes ADF e KPSS.
+
 ```{r}
 #| output: false
 #| echo: false
 #| warning: false
 
-dados_diff = dados %>% 
-  dplyr::select(tbill, tbill_3year) %>% 
-  ts(start = 1960, frequency = 4) %>% 
+dados_diff = dados %>%
+  dplyr::select(tbill, tbill_3year) %>%
+  ts(start = 1960, frequency = 4) %>%
   diff(., differences = 1)
 
 
@@ -262,12 +314,12 @@ t2 = t^2
 
 ajuste <-   lm( dados$tbill ~ dados$tbill_3year)
 
-summary(ajuste)
+jtools::summ(ajuste)
 
 cointegracao = ajuste$residuals
 
-teste_integracao(nome = 'erros', type = 'none', lags = 0, serie = cointegracao)
-urca::ur.kpss(cointegracao) %>% summary()
+#teste_integracao(nome = 'erros', type = 'none', lags = 0, serie = cointegracao)
+#urca::ur.kpss(cointegracao) %>% summary()
 
 cointegracao = cointegracao %>% lag()
 
@@ -275,25 +327,32 @@ cointegracao = cointegracao %>% lag()
 
 ```
 
-```{r}
 
+Após isso, rodamos a regressão com 8 defasagens:
+
+<br><br>
+
+```{r}
+#| echo: false
+#| warning: false
 
 dados_vec2 = tibble(
   tbill = dados$tbill %>% diff(),
   tbill_3year = dados$tbill_3year %>% diff(),
   coef_lp = cointegracao[-1])
 
-dados_vec2 = tibble(
-  tbill = dados$tbill,
-  tbill_3year = dados$tbill_3year,
-  coef_lp = cointegracao) %>% 
-  na.omit()
+# dados_vec2 = tibble(
+#   tbill = dados$tbill,
+#   tbill_3year = dados$tbill_3year,
+#   coef_lp = cointegracao) %>%
+#   na.omit()
 
 
-vars::VARselect(dados_vec2, type = 'none')
+#vars::VARselect(dados_vec2, type = 'none')
 
-vars::VAR(dados_vec2, p = 8, type = 'none')
+var <- vars::VAR(dados_vec2, p = 8, type = 'const')
 
+var$varresult$tbill
 
 ```
 
@@ -304,18 +363,41 @@ vars::VAR(dados_vec2, p = 8, type = 'none')
 
 -   **Refaça o exercício usando o procedimento de Johansen.**
 
+Foi utilizado o procedimento de Johansen para verificar a existência de relações de cointegração entre as taxas de juros de curto e longo prazo. O teste foi realizado com estatística do tipo trace, assim como o anterior, considerando uma constante no vetor de cointegração e utilizando sete defasagens (indicado pelo AIC). Os resultados indicam a presença de um vetor de cointegração ao nível de 5%, conforme os valores estatísticos do teste e os valores críticos.
+
+
+
 ```{r}
+#| echo: false
+#| warning: false
 
 johansen <- urca::ca.jo(dados[,c(3,4)], type = 'trace', ecdet = 'const', K = 7)
-summary(johansen)
+res0 <- summary(johansen)
+res0@teststat
+res0@cval
 
-library(vars)
-VARselect(dados[,c(3,4)], lag.max = 10, type = "const")
 
+# VARselect(dados[,c(3,4)], lag.max = 10, type = "const")
+
+
+```
+
+
+Com base nos resultados do teste de Johansen, foi estimado um modelo VECM com um vetor de cointegração (r = 1). Os resultados mostram que o termo de correção de erro (ECT) é estatisticamente significativo na equação da tbill, com sinal negativo, indicando convergência para o equilíbrio de longo prazo
+
+```{r}
+#| echo: false
+#| warning: false
 vec <- cajorls(johansen, r = 1)  # r = número de vetores cointegrantes, baseado no teste de Johansen
 summary(vec$rlm)
 
+```
 
+### Funções de Impulso Resposta
+
+```{r}
+#| echo: false
+#| warning: false
 vec_var <- vec2var(johansen, r = 1)
 
 irf_vec <- irf(vec_var,
@@ -329,7 +411,4 @@ irf_vec <- irf(vec_var,
 
 plot(irf_vec)
 ```
-
-
-
 

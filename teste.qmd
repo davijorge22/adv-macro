@@ -1,0 +1,349 @@
+---
+  title: "Homework 4 - Adv. Macro 1"
+author: 'Davi Jorge'
+format: pdf
+---
+  
+  # Homework 4 - Adv. Macro 1
+  
+  Link com códigos: [GitHub -Adv Macro](https://github.com/davijorge22/adv-macro)
+
+**Questão 1.** De posse da base de dados data_vec_alunos.xls, disponível na pasta da turma, estime um modelo VEC e calcule as elasticidades de curto e longo prazos da demanda de gasolina.
+
+-   **Aplique a metodologia Engle-Granger como visto em sala de aula e compare seus resultados com Alves and Bueno (2003). **
+  
+  ### Resposta:
+  
+  #### Método Engle-Granger
+  
+  ```{r}
+#| echo: false
+#| warning: false
+
+# Este chunk é responsável por carregar todas as bibliotecas R necessárias para a análise.
+# - `dplyr`, `tidyr`, `purrr`: Para manipulação e transformação de dados.
+# - `vars`, `urca`, `forecast`, `seasonal`, `svars`: Para análise de séries temporais, incluindo modelos VAR, VEC, testes de raiz unitária e funções de impulso-resposta.
+# - `ggplot2`: Para visualização gráfica das séries temporais.
+# - `PerformanceAnalytics`: Pode ser útil para visualização de correlações (embora não explicitamente usada neste trecho visível).
+# - `broom`, `modelsummary`, `kableExtra`: Para formatar e apresentar resultados de modelos de forma legível.
+# - `janitor`: Para limpar nomes de colunas, como visto na Questão 2.
+# A opção `options(scipen = 99999)` desabilita a notação científica para números grandes, facilitando a leitura dos resultados.
+library(dplyr)
+library(vars)
+library(ggplot2)
+library(PerformanceAnalytics)
+library(purrr)
+library(tidyr)
+library(seasonal)
+library(svars)
+library(broom)
+library(modelsummary)
+library(kableExtra)
+library(janitor) # Adicionado para clean_names na Q2
+
+options(scipen = 99999)
+Use code with caution.
+Quarto
+#| echo: false
+#| warning: false
+
+# Este chunk realiza as etapas iniciais de preparação de dados para a Questão 1.
+# 1. Importação dos Dados: `readxl::read_excel()` é usado para carregar o arquivo 'data_vec_alunos.xls'.
+# 2. Transformação para Logaritmo: `dplyr::mutate(dplyr::across(-Ano, log))` aplica a transformação logarítmica a todas as colunas, exceto 'Ano'. Isso é padrão em modelos econométricos para interpretar os coeficientes como elasticidades.
+# 3. Visualização das Séries em Log: `ts(start = 1994) %>% forecast::autoplot(facets= T)` converte os dados para um objeto de série temporal e plota cada série em um gráfico separado, permitindo uma inspeção visual inicial da tendência e estacionariedade.
+
+# Importando dados
+dados <- readxl::read_excel('data/data_vec_alunos.xls')
+
+# A primeira tarefa é colocar as variaveis em log 
+dados_log <- dados %>% 
+  dplyr::mutate(dplyr::across(-Ano, log))
+
+# Visualizando as séries em log
+dados_log %>%
+  dplyr::select(-Ano) %>% 
+  ts(start = 1994) %>% 
+  forecast::autoplot(facets= T)
+
+# Este chunk define uma função customizada `teste_integracao` para automatizar o teste de raiz unitária ADF.
+# 1. Função `teste_integracao`: Recebe o nome da série, a série em si, o tipo de teste (ex: "trend" ou "drift") e o número de lags.
+# 2. Teste ADF Iterativo: Ele usa `urca::ur.df()` para realizar o teste Dickey-Fuller Aumentado.
+# 3. Determinação da Ordem de Integração (I(d)): O loop `while` testa a série, e se a hipótese nula de raiz unitária não for rejeitada, a série é diferenciada e o teste é repetido. O contador `i` registra quantas vezes a série precisou ser diferenciada para se tornar estacionária (I(0)).
+# 4. Retorno: A função retorna um `tibble` com o nome da série e sua ordem de integração.
+
+# Segunda tarefa: testar o grau de integração
+teste_integracao <- function( nome, serie, type, lags){
+  
+  # Exemplos de uso interno para depuração
+  # serie <- dados_log$Pgasolina
+  # type = "trend"
+  # lags = 2
+  
+  adf_test <- urca::ur.df(serie, type = type, selectlags = "BIC", lags = lags)
+  
+  pp1 <- adf_test@cval[1] %>% abs # Valor crítico (para comparação)
+  valor_teste <- adf_test@teststat[1] %>% abs # Valor da estatística de teste ADF
+  
+  i = 0 # Contador para a ordem de integração
+  
+  # Loop para diferenciar a série até que se torne estacionária
+  while (valor_teste < pp1) { # Condição de não rejeição da raiz unitária (valor_teste deve ser maior ou igual a pp1 para rejeitar)
+    
+    i = i + 1 # Incrementa a ordem de integração
+    
+    serie <- serie %>% diff # Diferencia a série
+    
+    adf_test <- urca::ur.df(serie, type = type, selectlags = "BIC", lags = lags)
+    
+    pp1 <- adf_test@cval[1] %>% abs
+    valor_teste <- adf_test@teststat[1] %>% abs
+    
+  }
+  
+  res <- tibble::tibble(serie = nome, ordem_integracao = i)
+  
+  return(res)
+  
+}
+
+# Este chunk aplica a função `teste_integracao` para determinar a ordem de integração de cada série.
+# 1. Aplicação Múltipla: `teste_integracao` é chamada para `PIB_cap`, `Pgasolina`, `Petanol` e `Cgasolina` com diferentes configurações de `type` e `lags`.
+# 2. Resultados: `teste1` e `teste2` armazenam os resultados. Embora o código original chame `teste2` duas vezes e `Pgasolina` também seja chamada duas vezes, a intenção é verificar a estacionariedade de todas as variáveis.
+# O texto seguinte indica que as séries foram encontradas como I(2), mas que para consistência com o trabalho de Alves and Bueno (2003), a análise prosseguirá assumindo I(1).
+
+lags = 2 # Um valor de lags comum para os testes
+
+teste1 = teste_integracao(names(dados_log)[2], dados_log$PIB_cap, "drift", lags = 0) %>%
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags = 1)) %>% 
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags = 1)) %>% # Possível duplicação ou teste com lag diferente
+  rbind(teste_integracao(names(dados_log)[4], dados_log$Petanol, "drift", lags = 2)) %>% 
+  rbind(teste_integracao(names(dados_log)[5], dados_log$Cgasolina, "drift", lags = 0));# teste1
+
+teste2 = teste_integracao(names(dados_log)[2], dados_log$PIB_cap, "drift", lags) %>%
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags)) %>% 
+  rbind(teste_integracao(names(dados_log)[3], dados_log$Pgasolina, "drift", lags)) %>% # Possível duplicação ou teste com lag diferente
+  rbind(teste_integracao(names(dados_log)[4], dados_log$Petanol, "drift", lags)) %>% 
+  rbind(teste_integracao(names(dados_log)[5], dados_log$Cgasolina, "trend", lags)); #teste2
+Use code with caution.
+{r}
+Foi realizado testes de integração nas series e encontrei que as séries são I(2). Os testes foram feitos a partir do teste de raiz unitária Dickey Fuller Aumentado. Para que a interpretação do modelo seja a mesma do trabalho de Alves and Bueno (2003), assumiremos apenas uma integração.
+#| echo: false
+#| warning: false
+
+# Este chunk implementa a primeira etapa da metodologia Engle-Granger para a cointegração: a estimação da relação de longo prazo.
+# 1. Criação de Tendências Temporais: `t` e `t2` criam variáveis de tendência linear e quadrática.
+# 2. Regressão de Cointegração (Long-Prazo): `lm(dados_log$Cgasolina ~ ...)` estima uma regressão OLS da demanda de gasolina (variável dependente) em suas variáveis explicativas (PIB per capita, preço da gasolina, preço do etanol) e nas tendências temporais. Os coeficientes desta regressão representam a relação de longo prazo.
+# 3. Extração dos Resíduos: `ajuste$residuals` obtém os resíduos da regressão. Estes resíduos são candidatos ao termo de correção de erros (ECM).
+# 4. Teste de Estacionariedade dos Resíduos: `teste_integracao(..., serie = cointegracao)` e `urca::ur.kpss(cointegracao)` aplicam os testes ADF e KPSS aos resíduos. Se os resíduos forem estacionários (I(0)), isso indica que as séries são cointegradas.
+# 5. Defasagem dos Resíduos: `cointegracao %>% lag()` defasa o termo de correção de erros em uma período. Isso é necessário para usá-lo na equação de curto prazo do VEC.
+
+t = c(1:nrow(dados_log)) # Cria uma variável de tempo linear
+
+t2 = t^2 # Cria uma variável de tempo quadrática
+
+# Estima a regressão de cointegração (relação de longo prazo)
+ajuste <- lm(dados_log$Cgasolina ~ t + t2 + dados_log$PIB_cap + dados_log$Pgasolina + dados_log$Petanol)
+
+summary(ajuste) # Mostra o sumário da regressão de longo prazo
+
+cointegracao = ajuste$residuals # Extrai os resíduos da regressão (termo de correção de erros)
+
+# Testa a estacionariedade dos resíduos usando o teste ADF (tipo 'none' para resíduos)
+a = teste_integracao(nome = 'erros', type = 'none', lags = 0, serie = cointegracao)
+# Testa a estacionariedade dos resíduos usando o teste KPSS
+b = urca::ur.kpss(cointegracao) %>% summary()
+
+cointegracao = cointegracao %>% lag() # Defasagem dos resíduos para usar como ECM na equação de curto prazo
+Use code with caution.
+{r}
+# Este chunk implementa a segunda etapa da metodologia Engle-Granger: a estimação do modelo de correção de erros (ECM) para as dinâmicas de curto prazo.
+# 1. Diferenciação das Séries: `dados_log %>% ... %>% diff(., differences = 1)` transforma as séries em log para suas primeiras diferenças. Isso as torna estacionárias, assumindo que eram I(1).
+# 2. Estimação do ECM: `lm(dados_diff[,4] ~ ...)` estima uma regressão OLS da primeira diferença da demanda de gasolina (Cgasolina) em suas primeiras diferenças das variáveis explicativas, e mais importante, no termo de correção de erros defasado (`cointegracao`).
+# O coeficiente do termo `cointegracao` (o ECM) mede a velocidade de ajuste de volta ao equilíbrio de longo prazo após um choque de curto prazo.
+
+# Diferenciação das séries em log
+dados_diff = dados_log %>%
+  dplyr::select(-Ano) %>%
+  ts(start = 1994) %>%
+  diff(., differences = 1)
+
+# Criação de tendências temporais para as séries diferenciadas (raramente usadas em séries I(1) diferenciadas)
+t = c(1:nrow(dados_diff))
+t2 = t^2
+
+# Estima o modelo de correção de erros (ECM) para as dinâmicas de curto prazo
+ajuste <- lm(dados_diff[,4] ~ t + t2 + dados_diff[,3] + dados_diff[,2] + dados_diff[,1] + cointegracao[1:nrow(dados_diff)])
+
+summary(ajuste) # Mostra o sumário da regressão do ECM
+Use code with caution.
+{r}
+\newpage
+Método Johansen
+Refaça o exercício usando o procedimento de Johansen.
+# Este chunk aplica a metodologia de Johansen para testar a cointegração e estimar o modelo VEC para a Questão 1.
+# 1. Teste de Cointegração de Johansen: `urca::ca.jo()` realiza o teste.
+#    - `dados_log[,-1]`: Usa todas as variáveis em log, exceto a coluna 'Ano'.
+#    - `type = 'trace'`: Especifica o teste do traço para determinar o número de relações de cointegração.
+#    - `ecdet = 'trend'`: Assume uma tendência determinística nas relações de cointegração.
+#    - `K = 3`: Número de lags do VAR para o teste (escolha informada por critérios de seleção de lags).
+# 2. Seleção de Lags para o VAR: `VARselect()` ajuda a identificar o número ideal de lags (p) para o modelo VAR, usando critérios como AIC, BIC, HQ, FPE.
+# 3. Estimação do VEC: `cajorls()` estima o modelo VEC com base nos resultados do teste de Johansen.
+#    - `r = 3`: O número de vetores de cointegração (relações de longo prazo) a serem considerados, determinado a partir do `summary(johansen)`.
+# 4. Conversão VEC para VAR: `vec2var()` transforma o modelo VEC estimado em sua representação VAR equivalente.
+# 5. Funções de Impulso-Resposta (IRF): `irf()` calcula as IRFs, mostrando como um choque em uma variável (aqui, "Petanol") afeta as outras variáveis do sistema ao longo do tempo. `plot(irf_vec)` visualiza esses resultados.
+
+johansen <- urca::ca.jo(dados_log[,-1], type = 'trace', ecdet = 'trend', K = 3)
+summary(johansen)
+
+library(vars) # Carrega a biblioteca vars, se ainda não estiver carregada
+VARselect(dados_log[,-1], lag.max = 10, type = "const")
+
+vec <- cajorls(johansen, r = 3)  # Estima o VEC com 3 vetores cointegrantes, baseado no teste de Johansen
+summary(vec$rlm) # Sumário do VEC estimado
+
+vec_var <- vec2var(johansen, r = 3) # Converte o VEC para a representação VAR
+
+irf_vec <- irf(vec_var,
+               runs = 1000, # Número de simulações para o bootstrap
+               impulse = "Petanol",     # Variável que recebe o choque
+               # response = "y",    # Variável(is) que responde(m) (comentado, então todas respondem)
+               n.ahead = 20,      # Horizonte de resposta do choque
+               boot = TRUE,       # Usar bootstrap para calcular intervalos de confiança
+               ci = 0.95,         # Nível de confiança de 95%
+)         
+plot(irf_vec) # Plota as Funções de Impulso-Resposta
+Use code with caution.
+{r}
+Questão 2. De posse da base de dados quartely.xls, disponível na pasta da turma, estime um
+modelo VEC para a relação entre a Tbill e a Tbill_3year replicando os resultados de sala de aula.
+Aplique a metodologia Engle-Granger e o procedimento de Johansen separadamente. Você deve apresentar a relação de longo prazo estimada.
+Resposta:
+  Método Engle-Granger
+#| output: false
+#| echo: false
+#| warning: false
+
+# Este chunk prepara os dados para a Questão 2.
+# 1. Importação e Limpeza: `readxl::read_excel()` importa os dados. `janitor::clean_names()` padroniza os nomes das colunas.
+# 2. Conversão de Datas e Tipos: `dplyr::mutate()` converte a coluna 'date' para o formato de data (ano-trimestre) e garante que as colunas de juros sejam numéricas.
+# 3. Remoção de NAs: `na.omit()` remove linhas com valores ausentes.
+# 4. Visualização das Séries: O código utiliza `ggplot2` com `pivot_longer` para plotar as séries `tbill` e `tbill_3year` no mesmo gráfico, facilitando a comparação visual de suas tendências e comportamento conjunto.
+
+# Importando dados
+dados <- readxl::read_excel('data/quarterly.xls') %>%
+  janitor::clean_names() %>% # Limpa nomes das colunas (ex: espaços, maiúsculas)
+  dplyr::mutate(date = lubridate::yq(date), # Converte coluna de data para formato de data (ano-trimestre)
+                dplyr::across(c(ffr, tbill, tbill_3year, tbill_10year ), as.numeric)) %>% # Garante que as colunas de juros sejam numéricas
+  na.omit() # Remove linhas com valores ausentes
+
+# Visualiza as séries tbill e tbill_3year
+dados %>%
+  # PASSO CHAVE: Transformar os dados para o formato longo para plotar múltiplas séries no mesmo gráfico
+  pivot_longer(
+    cols = c(tbill, tbill_3year), # Selecione as colunas que você quer plotar
+    names_to = "series",          # Nome da nova coluna para os nomes das séries (ex: "tbill", "tbill_3year")
+    values_to = "value"           # Nome da nova coluna para os valores numéricos
+  ) %>%
+  ggplot(aes(x = date, y = value, linetype = series)) + # Mapeie 'series' para a cor para criar a legenda
+  geom_line() + # Agora, uma única geom_line é suficiente, pois a cor já diferencia
+  labs(
+    title = "Taxas de Juros ao Longo do Tempo",
+    x = "Data",
+    y = "Taxa (%)",
+    linetype = "Série" # Título da legenda
+  ) +
+  theme_minimal()
+
+# Este chunk aplica a função `teste_integracao` para determinar a ordem de integração das séries `tbill` e `tbill_3year`, essencial para a metodologia Engle-Granger.
+
+# Segunda tarefa: testar o grau de integração
+teste1 = teste_integracao('tbill3m', dados$tbill, "drift", lags = 10) %>%
+  rbind(teste_integracao('tbill3y', dados$tbill_3year, "drift", lags = 10)); teste1
+Use code with caution.
+{r}
+#| output: false
+#| echo: false
+#| warning: false
+
+# Este chunk implementa as etapas principais da metodologia Engle-Granger para a Questão 2.
+# 1. Diferenciação das Séries: `dados %>% ... %>% diff()` calcula a primeira diferença das séries `tbill` e `tbill_3year`, tornando-as estacionárias.
+# 2. Regressão de Cointegração (Long-Prazo): `lm(dados$tbill ~ dados$tbill_3year)` estima a relação de longo prazo entre as duas taxas de juros.
+# 3. Extração e Teste dos Resíduos: Os resíduos (`cointegracao`) são extraídos e testados para estacionariedade usando `teste_integracao` e `urca::ur.kpss()`. Se estacionários, indicam cointegração.
+# 4. Defasagem dos Resíduos: O termo de correção de erros é defasado (`cointegracao %>% lag()`) para ser usado na estimação do ECM de curto prazo.
+# As definições `dados_vec2` e chamadas `vars::VARselect` e `vars::VAR` parecem estar preparando dados e estimando um VAR ou ECM de curto prazo, embora a estrutura exata do ECM de curto prazo não esteja totalmente visível (pode ser um VAR com o ECT incluído).
+
+# Diferenciação das séries para as primeiras diferenças
+dados_diff = dados %>%
+  dplyr::select(tbill, tbill_3year) %>%
+  ts(start = 1960, frequency = 4) %>%
+  diff(., differences = 1)
+
+# Criação de variável de tempo (pode não ser necessária se as séries forem I(1) e o ECM já tiver um intercepto)
+t = c(1:length(dados_diff))
+t2 = t^2
+
+# Estima a regressão de cointegração (relação de longo prazo)
+ajuste <-   lm( dados$tbill ~ dados$tbill_3year)
+
+summary(ajuste) # Sumário da regressão de longo prazo
+
+cointegracao = ajuste$residuals # Extração dos resíduos (ECM)
+
+# Teste de estacionariedade dos resíduos
+teste_integracao(nome = 'erros', type = 'none', lags = 0, serie = cointegracao)
+urca::ur.kpss(cointegracao) %>% summary()
+
+cointegracao = cointegracao %>% lag() # Defasagem do ECM
+
+# Prepara um tibble para o modelo VAR de curto prazo (com ECT defasado, se o objetivo for ECM)
+dados_vec2 = tibble(
+  tbill = dados$tbill %>% diff(),
+  tbill_3year = dados$tbill_3year %>% diff(),
+  coef_lp = cointegracao[-1]) # `[-1]` remove o primeiro NA da defasagem
+
+# Outra forma de preparar o tibble (parece menos direcionada ao ECM explícito se não for diferenciado aqui)
+dados_vec2 = tibble(
+  tbill = dados$tbill,
+  tbill_3year = dados$tbill_3year,
+  coef_lp = cointegracao) %>%
+  na.omit() # Remove NAs criados pela defasagem
+
+vars::VARselect(dados_vec2, type = 'none') # Seleção de lags para o VAR
+
+vars::VAR(dados_vec2, p = 8, type = 'none') # Estima o modelo VAR
+Use code with caution.
+{r}
+\newpage
+Método Johansen
+Refaça o exercício usando o procedimento de Johansen.
+# Este chunk aplica a metodologia de Johansen para testar a cointegração e estimar o modelo VEC para a Questão 2.
+# 1. Teste de Cointegração de Johansen: `urca::ca.jo()` realiza o teste.
+#    - `dados[,c(3,4)]`: Seleciona as colunas de `tbill` e `tbill_3year`.
+#    - `type = 'trace'`: Usa o teste do traço.
+#    - `ecdet = 'const'`: Assume uma constante nas relações de cointegração (mas sem tendência).
+#    - `K = 7`: Número de lags.
+# 2. Seleção de Lags para o VAR: `VARselect()` ajuda a escolher o melhor número de lags para o VAR.
+# 3. Estimação do VEC: `cajorls()` estima o modelo VEC com base no número de vetores de cointegração `r = 1` (determinado pelo teste de Johansen).
+# 4. Conversão VEC para VAR: `vec2var()` transforma o modelo VEC em sua representação VAR.
+# 5. Funções de Impulso-Resposta (IRF): `irf()` calcula as IRFs, mostrando como um choque em uma variável (aqui, a visualização plotará todos os choques e respostas) afeta as outras variáveis do sistema ao longo do tempo. `plot(irf_vec)` visualiza esses resultados.
+
+johansen <- urca::ca.jo(dados[,c(3,4)], type = 'trace', ecdet = 'const', K = 7)
+summary(johansen)
+
+library(vars) # Carrega a biblioteca vars
+VARselect(dados[,c(3,4)], lag.max = 10, type = "const")
+
+vec <- cajorls(johansen, r = 1)  # Estima o VEC com 1 vetor cointegrante, baseado no teste de Johansen
+summary(vec$rlm) # Sumário do VEC estimado
+
+vec_var <- vec2var(johansen, r = 1) # Converte o VEC para a representação VAR
+
+irf_vec <- irf(vec_var,
+               runs = 1000, # Número de simulações para o bootstrap
+               #impulse = "Petanol",     # Variável que sofre o choque (comentado, então choques em ambas)
+               # response = "y",    # Variável(is) que responde(m) (comentado, então todas respondem)
+               n.ahead = 20,      # Horizonte de resposta
+               boot = TRUE,       # Usar bootstrap para CI
+               ci = 0.95,         # Nível de confiança
+)         
+plot(irf_vec) # Plota as Funções de Impulso-Resposta
